@@ -1,0 +1,20 @@
+name: Patrolio Inactive Sessions
+
+# Run this workflow every 15 minutes
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # every 15 minutes
+  workflow_dispatch:  # allows manual trigger
+
+jobs:
+  call_inactive_sessions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call Patrol API for inactive sessions
+        env:
+          BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
+        run: |
+          echo "Calling inactive_sessions API..."
+          curl -H "X-API-KEY: $BACKEND_API_KEY" \
+               -X GET "https://patrolio-patrol-sessions.onrender.com/inactive_sessions/15"
