@@ -12,6 +12,13 @@ class StartPatrol(BaseModel):
     sender_email: EmailStr
     receiver_email: EmailStr
 
+
+class LookupPatrol(BaseModel):
+    first_name: str
+    last_name: str
+    sender_email: EmailStr
+    receiver_email: EmailStr
+
 # In-memory store (ephemeral — will be lost on service restart)
 patrol_sessions: Dict[str, dict] = {}
 
@@ -52,3 +59,15 @@ def end_patrol(session_id: str):
 @app.get("/sessions")
 def list_sessions():
     return {"count": len(patrol_sessions), "sessions": patrol_sessions}
+
+@app.post("/get_session_id")
+def get_session_id(query: LookupPatrol):
+    for session_id, data in patrol_sessions.items():
+        if (
+            data["first_name"] == query.first_name
+            and data["last_name"] == query.last_name
+            and data["sender_email"] == query.sender_email
+            and data["receiver_email"] == query.receiver_email
+        ):
+            return {"session_id": session_id, "data": data}
+    raise HTTPException(status_code=404, detail="no matching session found")
