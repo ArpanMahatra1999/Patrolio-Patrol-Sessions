@@ -71,3 +71,14 @@ def get_session_id(query: LookupPatrol):
         ):
             return {"session_id": session_id, "data": data}
     raise HTTPException(status_code=404, detail="no matching session found")
+
+@app.get("/photo_time/{session_id}")
+def get_photo_time(session_id: str):
+    session = patrol_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {
+        "session_id": session_id,
+        "photo_time": session["photo_time"]
+    }
+
