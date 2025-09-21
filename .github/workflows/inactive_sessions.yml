@@ -3,7 +3,7 @@ name: Patrolio Inactive Sessions
 # Run this workflow every 15 minutes
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15 minutes
+    - cron: '*/15 * * * *'  # every 15 minutes UTC
   workflow_dispatch:  # allows manual trigger
 
 jobs:
@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Show timestamps
+        run: |
+          echo "Workflow triggered at $(date -u) UTC"
+          echo "Workflow triggered at $(TZ='America/New_York' date) ET"
+
       - name: Call Patrol API for inactive sessions
         env:
           BACKEND_API_KEY: ${{ secrets.BACKEND_API_KEY }}
