@@ -1,9 +1,9 @@
 name: Patrolio Inactive Sessions
 
-# Run this workflow every 15 minutes
+# Trigger workflow manually or on schedule
 on:
   schedule:
-    - cron: '*/5 * * * *'  # every 15 minutes UTC
+    - cron: '*/5 * * * *'  # every 5 minutes UTC
   workflow_dispatch:  # allows manual trigger
 
 jobs:
@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Show timestamps
+      - name: Print workflow start
         run: |
-          echo "Workflow triggered at $(date -u) UTC"
-          echo "Workflow triggered at $(TZ='America/New_York' date) ET"
+          echo "Workflow started at $(date -u) UTC"
+          echo "Workflow started at $(TZ='America/New_York' date) ET"
 
       - name: Call Patrol API for inactive sessions
         env:
@@ -23,3 +23,4 @@ jobs:
           echo "Calling inactive_sessions API..."
           curl -H "X-API-KEY: $BACKEND_API_KEY" \
                -X GET "https://patrolio-patrol-sessions.onrender.com/inactive_sessions/15"
+          echo "API call completed at $(date -u) UTC"
