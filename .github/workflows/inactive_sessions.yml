@@ -3,7 +3,7 @@ name: Patrolio Inactive Sessions
 # Run this workflow every 15 minutes
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15 minutes UTC
+    - cron: '*/5 * * * *'  # every 15 minutes UTC
   workflow_dispatch:  # allows manual trigger
 
 jobs:
