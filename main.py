@@ -1,20 +1,28 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import Dict
 import uuid
 import requests
 import os
-
-app = FastAPI(title="Patrol API")
+from supabase import create_client, Client
 
 # ------------------------
 # Config
 # ------------------------
+app = FastAPI(title="Patrol API")
 ET = ZoneInfo("America/Toronto")
+
 EMAIL_BACKEND_URL = "https://patrolio-email-backend.onrender.com/send-email"
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Missing Supabase configuration (SUPABASE_URL / SUPABASE_KEY)")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ------------------------
 # Data Models
@@ -32,19 +40,11 @@ class LookupPatrol(BaseModel):
     receiver_email: EmailStr
 
 # ------------------------
-# In-memory storage
+# Helpers
 # ------------------------
-patrol_sessions: Dict[str, dict] = {}
-
 def now_iso():
-    return datetime.now(ET).replace(microsecond=0).isoformat()
+    return datetime.utcnow().replace(microsecond=0).isoformat()
 
-def parse_iso(ts: str):
-    return datetime.fromisoformat(ts)
-
-# ------------------------
-# Helper: Send email via backend
-# ------------------------
 def send_email(to_email: str, subject: str, body: str):
     headers = {"X-API-KEY": BACKEND_API_KEY}
     data = {"to_email": to_email, "subject": subject, "text": body}
@@ -60,75 +60,70 @@ def send_email(to_email: str, subject: str, body: str):
 
 @app.post("/start_patrol")
 def start_patrol(data: StartPatrol):
-    session_id = str(uuid.uuid4())
-    start_time = now_iso()
-    patrol_sessions[session_id] = {
-        "start_time": start_time,
-        "photo_time": start_time,
+    response = supabase.table("patrol_sessions").insert({
         "first_name": data.first_name,
         "last_name": data.last_name,
         "sender_email": data.sender_email,
-        "receiver_email": data.receiver_email
-    }
-    return {"message": "patrol started", "session_id": session_id, "data": patrol_sessions[session_id]}
+        "receiver_email": data.receiver_email,
+        "start_time": now_iso(),
+        "photo_time": now_iso(),
+        "status": "active"
+    }).execute()
+    return {"message": "patrol started", "data": response.data[0]}
 
 @app.post("/pause_patrol/{session_id}")
 def pause_patrol(session_id: str):
-    session = patrol_sessions.get(session_id)
-    if not session:
+    response = supabase.table("patrol_sessions").update({
+        "photo_time": now_iso()
+    }).eq("id", session_id).execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="session not found")
-    session["photo_time"] = now_iso()
-    return {"message": "photo_time updated", "data": session}
+    return {"message": "photo_time updated", "data": response.data[0]}
 
 @app.post("/end_patrol/{session_id}")
 def end_patrol(session_id: str):
-    session = patrol_sessions.pop(session_id, None)
-    if not session:
+    response = supabase.table("patrol_sessions").update({
+        "status": "ended"
+    }).eq("id", session_id).execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="session not found")
-    return {"message": "patrol ended", "ended_session": session}
+    return {"message": "patrol ended", "data": response.data[0]}
 
 @app.get("/photo_time/{session_id}")
 def get_photo_time(session_id: str):
-    session = patrol_sessions.get(session_id)
-    if not session:
+    response = supabase.table("patrol_sessions").select("photo_time").eq("id", session_id).execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="session not found")
-    return {"session_id": session_id, "photo_time": session["photo_time"]}
+    return {"session_id": session_id, "photo_time": response.data[0]["photo_time"]}
 
 @app.post("/get_session_id")
 def get_session_id(query: LookupPatrol):
-    for session_id, data in patrol_sessions.items():
-        if (
-            data["first_name"] == query.first_name
-            and data["last_name"] == query.last_name
-            and data["sender_email"] == query.sender_email
-            and data["receiver_email"] == query.receiver_email
-        ):
-            return {"session_id": session_id, "data": data}
-    raise HTTPException(status_code=404, detail="no matching session found")
+    response = supabase.table("patrol_sessions").select("*") \
+        .eq("first_name", query.first_name) \
+        .eq("last_name", query.last_name) \
+        .eq("sender_email", query.sender_email) \
+        .eq("receiver_email", query.receiver_email) \
+        .eq("status", "active") \
+        .execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="no matching session found")
+    return {"session_id": response.data[0]["id"], "data": response.data[0]}
 
 @app.get("/all_session_ids")
 def all_session_ids():
-    return {"count": len(patrol_sessions), "session_ids": list(patrol_sessions.keys())}
+    response = supabase.table("patrol_sessions").select("id").execute()
+    return {"count": len(response.data), "session_ids": [r["id"] for r in response.data]}
 
 @app.get("/inactive_sessions/{minutes}")
 def inactive_sessions(minutes: int):
-    now = datetime.now(ET)
-    expired_sessions = []
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+    response = supabase.table("patrol_sessions") \
+        .select("*") \
+        .lt("photo_time", cutoff.isoformat()) \
+        .eq("status", "active") \
+        .execute()
 
-    # Step 1: Find inactive sessions
-    for session_id, data in patrol_sessions.items():
-        photo_time = parse_iso(data["photo_time"])
-        diff_minutes = (now - photo_time).total_seconds() / 60
-        if diff_minutes > minutes:
-            expired_sessions.append({
-                "session_id": session_id,
-                "first_name": data["first_name"],
-                "last_name": data["last_name"],
-                "sender_email": data["sender_email"],
-                "receiver_email": data["receiver_email"],
-                "diff_minutes": round(diff_minutes, 2)
-            })
-
+    expired_sessions = response.data
     if not expired_sessions:
         return {"minutes_threshold": minutes, "expired_sessions": []}
 
@@ -148,7 +143,7 @@ def inactive_sessions(minutes: int):
             f"{session['first_name']} {session['last_name']} ({session['sender_email']})"
         )
 
-    # Step 4: Notify all receiver emails (one per receiver)
+    # Step 4: Notify receivers
     for receiver, guards in receivers_map.items():
         subject = "Patrolio: Gaps in Patrol Sessions"
         body = "Following are the guards, who did not click photo in last few minutes.\n\n"
@@ -164,4 +159,5 @@ def inactive_sessions(minutes: int):
 
 @app.get("/sessions")
 def list_sessions():
-    return {"count": len(patrol_sessions), "sessions": patrol_sessions}
+    response = supabase.table("patrol_sessions").select("*").execute()
+    return {"count": len(response.data), "sessions": response.data}
