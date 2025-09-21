@@ -127,11 +127,15 @@ def inactive_sessions(minutes: int):
     if not expired_sessions:
         return {"minutes_threshold": minutes, "expired_sessions": []}
 
+    print("Step 1 completed")
+
     # Step 2: Notify all sender emails
     for session in expired_sessions:
         subject = "Patrolio: Gap in Patrol Session"
         body = f"Hi {session['first_name']} {session['last_name']}, You have been found inactive for last few minutes. Please keep sending photos."
         send_email(session["sender_email"], subject, body)
+
+    print("Step 2 completed")
 
     # Step 3: Group by receiver email
     receivers_map = {}
@@ -142,6 +146,8 @@ def inactive_sessions(minutes: int):
         receivers_map[receiver].append(
             f"{session['first_name']} {session['last_name']} ({session['sender_email']})"
         )
+
+    print("Step 3 completed")
 
     # Step 4: Notify receivers
     for receiver, guards in receivers_map.items():
