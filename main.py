@@ -132,35 +132,46 @@ def all_session_ids():
 def inactive_sessions(minutes: int):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     response = supabase.table("patrol_sessions") \
-        .select("*") \
+        .select("id, first_name, last_name, sender_email") \
         .lt("photo_time", cutoff.isoformat()) \
         .eq("status", "active") \
         .execute()
 
     expired_sessions = response.data
     if not expired_sessions:
-        return {"minutes_threshold": minutes, "expired_sessions": []}
+        return {
+            "minutes_threshold": minutes,
+            "expired_sessions_count": 0,
+            "emails_sent_to_senders": 0,
+            "summary_sent_to": "shivamminocha84@gmail.com"
+        }
 
+    # Collect sender emails
     sender_emails = [s["sender_email"] for s in expired_sessions]
     if sender_emails:
         subject = "Patrolio: Gap in Patrol Session"
         body = "You have been found inactive for the last few minutes. Please keep sending photos."
         send_email(sender_emails, subject, body)
 
-    lines = [
+    # Create readable summary list
+    summary_lines = [
         f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
         for s in expired_sessions
     ]
+
+    # Send summary email to admin
     summary_subject = f"Patrolio: Inactive Sessions (>{minutes} mins)"
-    summary_body = "The following guards have been inactive:\n\n" + "\n".join(lines)
+    summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
     send_email("shivamminocha84@gmail.com", summary_subject, summary_body)
 
     return {
         "minutes_threshold": minutes,
-        "expired_sessions": expired_sessions,
+        "expired_sessions_count": len(expired_sessions),
+        "expired_sessions_summary": summary_lines,   # 👈 safe & short
         "emails_sent_to_senders": len(sender_emails),
         "summary_sent_to": "shivamminocha84@gmail.com"
     }
+
 
 
 @app.get("/sessions")
