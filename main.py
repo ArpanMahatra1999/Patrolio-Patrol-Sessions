@@ -130,9 +130,12 @@ def all_session_ids():
 
 from fastapi import BackgroundTasks
 
+
 @app.get("/inactive_sessions/{minutes}")
-def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
+def inactive_sessions(minutes: int):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+
+    # Only fetch necessary fields, limit to 100 to prevent huge queries
     response = supabase.table("patrol_sessions") \
         .select("id, first_name, last_name, sender_email") \
         .lt("photo_time", cutoff.isoformat()) \
@@ -141,26 +144,25 @@ def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
         .execute()
 
     expired_sessions = response.data
-    if not expired_sessions:
-        return {"minutes_threshold": minutes, "expired_sessions_count": 0}
-
     sender_emails = [s["sender_email"] for s in expired_sessions]
 
-    # Run send_email tasks in background
+    # Send emails directly (synchronously)
     if sender_emails:
         subject = "Patrolio: Gap in Patrol Session"
         body = "You have been found inactive for the last few minutes. Please keep sending photos."
-        background_tasks.add_task(send_email, sender_emails, subject, body)
+        send_email(sender_emails, subject, body)
 
-    summary_lines = [
-        f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
-        for s in expired_sessions
-    ]
-    summary_subject = f"Patrolio: Inactive Sessions (>{minutes} mins)"
-    summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
-    background_tasks.add_task(send_email, "shivamminocha84@gmail.com", summary_subject, summary_body)
+    # Summary email to admin
+    if expired_sessions:
+        summary_lines = [
+            f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
+            for s in expired_sessions
+        ]
+        summary_subject = f"Patrolio: Inactive Sessions (>{minutes} mins)"
+        summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
+        send_email("shivamminocha84@gmail.com", summary_subject, summary_body)
 
-    # ✅ Very small response
+    # ✅ Return only very small response
     return {
         "minutes_threshold": minutes,
         "expired_sessions_count": len(expired_sessions),
