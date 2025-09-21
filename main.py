@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -128,50 +128,45 @@ def all_session_ids():
     return {"count": len(response.data), "session_ids": [r["id"] for r in response.data]}
 
 
+from fastapi import BackgroundTasks
+
 @app.get("/inactive_sessions/{minutes}")
-def inactive_sessions(minutes: int):
+def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     response = supabase.table("patrol_sessions") \
         .select("id, first_name, last_name, sender_email") \
         .lt("photo_time", cutoff.isoformat()) \
         .eq("status", "active") \
+        .limit(100) \
         .execute()
 
     expired_sessions = response.data
     if not expired_sessions:
-        return {
-            "minutes_threshold": minutes,
-            "expired_sessions_count": 0,
-            "emails_sent_to_senders": 0,
-            "summary_sent_to": "shivamminocha84@gmail.com"
-        }
+        return {"minutes_threshold": minutes, "expired_sessions_count": 0}
 
-    # Collect sender emails
     sender_emails = [s["sender_email"] for s in expired_sessions]
+
+    # Run send_email tasks in background
     if sender_emails:
         subject = "Patrolio: Gap in Patrol Session"
         body = "You have been found inactive for the last few minutes. Please keep sending photos."
-        send_email(sender_emails, subject, body)
+        background_tasks.add_task(send_email, sender_emails, subject, body)
 
-    # Create readable summary list
     summary_lines = [
         f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
         for s in expired_sessions
     ]
-
-    # Send summary email to admin
     summary_subject = f"Patrolio: Inactive Sessions (>{minutes} mins)"
     summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
-    send_email("shivamminocha84@gmail.com", summary_subject, summary_body)
+    background_tasks.add_task(send_email, "shivamminocha84@gmail.com", summary_subject, summary_body)
 
+    # ✅ Very small response
     return {
         "minutes_threshold": minutes,
         "expired_sessions_count": len(expired_sessions),
-        "expired_sessions_summary": summary_lines,   # 👈 safe & short
         "emails_sent_to_senders": len(sender_emails),
         "summary_sent_to": "shivamminocha84@gmail.com"
     }
-
 
 
 @app.get("/sessions")
