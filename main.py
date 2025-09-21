@@ -95,9 +95,7 @@ def pause_patrol(session_id: str):
 
 @app.post("/end_patrol/{session_id}")
 def end_patrol(session_id: str):
-    response = supabase.table("patrol_sessions").update({
-        "status": "ended"
-    }).eq("id", session_id).execute()
+    response = supabase.table("patrol_sessions").delete().eq("id", session_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="session not found")
     return {"message": "patrol ended", "data": response.data[0]}
