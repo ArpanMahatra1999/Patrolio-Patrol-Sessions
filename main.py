@@ -28,6 +28,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
 # ------------------------
 # Data Models
 # ------------------------
@@ -37,17 +38,20 @@ class StartPatrol(BaseModel):
     sender_email: EmailStr
     receiver_email: EmailStr
 
+
 class LookupPatrol(BaseModel):
     first_name: str
     last_name: str
     sender_email: EmailStr
     receiver_email: EmailStr
 
+
 # ------------------------
 # Helpers
 # ------------------------
 def now_iso():
     return datetime.utcnow().replace(microsecond=0).isoformat()
+
 
 def send_email(to_emails, subject: str, body: str):
     """Send email via Gmail SMTP"""
@@ -68,6 +72,7 @@ def send_email(to_emails, subject: str, body: str):
     except Exception as e:
         print("Error sending email:", e)
 
+
 # ------------------------
 # API Endpoints
 # ------------------------
@@ -84,6 +89,7 @@ def start_patrol(data: StartPatrol):
     }).execute()
     return {"message": "patrol started", "data": response.data[0]}
 
+
 @app.post("/pause_patrol/{session_id}")
 def pause_patrol(session_id: str):
     response = supabase.table("patrol_sessions").update({
@@ -93,6 +99,7 @@ def pause_patrol(session_id: str):
         raise HTTPException(status_code=404, detail="session not found")
     return {"message": "photo_time updated", "data": response.data[0]}
 
+
 @app.post("/end_patrol/{session_id}")
 def end_patrol(session_id: str):
     response = supabase.table("patrol_sessions").delete().eq("id", session_id).execute()
@@ -100,12 +107,14 @@ def end_patrol(session_id: str):
         raise HTTPException(status_code=404, detail="session not found")
     return {"message": "patrol ended", "data": response.data[0]}
 
+
 @app.get("/photo_time/{session_id}")
 def get_photo_time(session_id: str):
     response = supabase.table("patrol_sessions").select("photo_time").eq("id", session_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="session not found")
     return {"session_id": session_id, "photo_time": response.data[0]["photo_time"]}
+
 
 @app.post("/get_session_id")
 def get_session_id(query: LookupPatrol):
@@ -120,16 +129,18 @@ def get_session_id(query: LookupPatrol):
         raise HTTPException(status_code=404, detail="no matching session found")
     return {"session_id": response.data[0]["id"], "data": response.data[0]}
 
+
 @app.get("/all_session_ids")
 def all_session_ids():
     response = supabase.table("patrol_sessions").select("id").execute()
     return {"count": len(response.data), "session_ids": [r["id"] for r in response.data]}
 
+
 @app.get("/inactive_sessions/{minutes}")
 def inactive_sessions(minutes: int):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
 
-    # Only fetch necessary fields, limit to 100 to prevent huge queries
+    # Only fetch the minimal fields needed
     response = supabase.table("patrol_sessions") \
         .select("id, first_name, last_name, sender_email") \
         .lt("photo_time", cutoff.isoformat()) \
@@ -140,13 +151,13 @@ def inactive_sessions(minutes: int):
     expired_sessions = response.data
     sender_emails = [s["sender_email"] for s in expired_sessions]
 
-    # Send emails directly via SMTP
+    # Send email alerts
     if sender_emails:
         subject = "Patrolio: Gap in Patrol Session"
         body = "You have been found inactive for the last few minutes. Please keep sending photos."
         send_email(sender_emails, subject, body)
 
-    # Summary email to admin
+    # Send summary email to admin
     if expired_sessions:
         summary_lines = [
             f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
@@ -156,15 +167,22 @@ def inactive_sessions(minutes: int):
         summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
         send_email("shivamminocha84@gmail.com", summary_subject, summary_body)
 
-    # ✅ Return only very small response to avoid large output
+    # ✅ Return only small JSON to cronjob.org
     return {
         "minutes_threshold": minutes,
         "expired_sessions_count": len(expired_sessions),
-        "emails_sent_to_senders": len(sender_emails),
-        "summary_sent_to": "shivamminocha84@gmail.com"
+        "emails_sent": len(sender_emails),
     }
+
 
 @app.get("/sessions")
 def list_sessions():
-    response = supabase.table("patrol_sessions").select("*").execute()
-    return {"count": len(response.data), "sessions": response.data}
+    # Only fetch IDs to keep response small
+    response = supabase.table("patrol_sessions").select("id").execute()
+    session_ids = [r["id"] for r in response.data]
+
+    # ✅ Always return small response
+    return {
+        "count": len(session_ids),
+        "sample_session_ids": session_ids[:10],  # preview max 10
+    }
