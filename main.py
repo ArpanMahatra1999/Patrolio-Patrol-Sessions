@@ -76,6 +76,11 @@ def send_email(to_emails, subject: str, body: str):
 # ------------------------
 # API Endpoints
 # ------------------------
+@app.post("/")
+def base():
+    return {"status": "APIs working"}
+
+
 @app.post("/start_patrol")
 def start_patrol(data: StartPatrol):
     response = supabase.table("patrol_sessions").insert({
