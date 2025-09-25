@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -141,11 +141,12 @@ def all_session_ids():
     return {"count": len(response.data), "session_ids": [r["id"] for r in response.data]}
 
 
+from fastapi import BackgroundTasks
+
 @app.get("/inactive_sessions/{minutes}")
-def inactive_sessions(minutes: int):
+def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
 
-    # Only fetch the minimal fields needed
     response = supabase.table("patrol_sessions") \
         .select("id, first_name, last_name, sender_email") \
         .lt("photo_time", cutoff.isoformat()) \
@@ -156,13 +157,15 @@ def inactive_sessions(minutes: int):
     expired_sessions = response.data
     sender_emails = [s["sender_email"] for s in expired_sessions]
 
-    # Send email alerts
+    # Queue background email sending
     if sender_emails:
-        subject = "Patrolio: Gap in Patrol Session"
-        body = "You have been found inactive for the last few minutes. Please keep sending photos."
-        send_email(sender_emails, subject, body)
+        background_tasks.add_task(
+            send_email,
+            sender_emails,
+            "Patrolio: Gap in Patrol Session",
+            "You have been found inactive for the last few minutes. Please keep sending photos."
+        )
 
-    # Send summary email to admin
     if expired_sessions:
         summary_lines = [
             f"{s['first_name']} {s['last_name']} ({s['sender_email']})"
@@ -170,14 +173,14 @@ def inactive_sessions(minutes: int):
         ]
         summary_subject = f"Patrolio: Inactive Sessions (>{minutes} mins)"
         summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
-        send_email("shivamminocha84@gmail.com", summary_subject, summary_body)
+        background_tasks.add_task(send_email, "shivamminocha84@gmail.com", summary_subject, summary_body)
 
-    # ✅ Return only small JSON to cronjob.org
+    # ✅ Respond immediately
     return {
         "minutes_threshold": minutes,
         "expired_sessions_count": len(expired_sessions),
-        "emails_sent": len(sender_emails),
     }
+
 
 
 @app.get("/sessions")
