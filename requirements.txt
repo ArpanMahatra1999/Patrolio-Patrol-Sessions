@@ -3,3 +3,4 @@ uvicorn[standard]
 pydantic[email]
 requests
 supabase
+sib-api-v3-sdk

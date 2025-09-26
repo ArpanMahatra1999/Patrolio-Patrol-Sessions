@@ -3,9 +3,11 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import os
-import smtplib
-from email.message import EmailMessage
 from supabase import create_client, Client
+
+# Brevo SDK
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 # ------------------------
 # Config
@@ -13,21 +15,24 @@ from supabase import create_client, Client
 app = FastAPI(title="Patrol API")
 ET = ZoneInfo("America/Toronto")
 
-# Gmail SMTP credentials
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
-
+# Supabase config
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not all([EMAIL_USER, EMAIL_APP_PASSWORD]):
-    raise RuntimeError("Missing Gmail SMTP configuration (EMAIL_USER / EMAIL_APP_PASSWORD)")
-
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing Supabase configuration (SUPABASE_URL / SUPABASE_KEY)")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Brevo config
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+if not BREVO_API_KEY:
+    raise RuntimeError("Missing Brevo API key")
+
+configuration = sib_api_v3_sdk.Configuration()
+configuration.api_key['api-key'] = BREVO_API_KEY
+brevo_client = sib_api_v3_sdk.TransactionalEmailsApi(
+    sib_api_v3_sdk.ApiClient(configuration)
+)
 
 # ------------------------
 # Data Models
@@ -54,23 +59,21 @@ def now_iso():
 
 
 def send_email(to_emails, subject: str, body: str):
-    """Send email via Gmail SMTP"""
+    """Send email via Brevo API"""
     if isinstance(to_emails, str):
         to_emails = [to_emails]
 
-    msg = EmailMessage()
-    msg["From"] = EMAIL_USER
-    msg["To"] = ", ".join(to_emails)
-    msg["Subject"] = subject
-    msg.set_content(body)
-
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-            smtp.starttls()
-            smtp.login(EMAIL_USER, EMAIL_APP_PASSWORD)
-            smtp.send_message(msg)
-    except Exception as e:
-        print("Error sending email:", e)
+        email = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": e} for e in to_emails],
+            sender={"email": "no-reply@patrolio.app", "name": "Patrolio App"},
+            subject=subject,
+            html_content=body,
+        )
+        response = brevo_client.send_transac_email(email)
+        print("✅ Email sent:", response)
+    except ApiException as e:
+        print("❌ Error sending email:", e)
 
 
 # ------------------------
@@ -141,8 +144,6 @@ def all_session_ids():
     return {"count": len(response.data), "session_ids": [r["id"] for r in response.data]}
 
 
-from fastapi import BackgroundTasks
-
 @app.get("/inactive_sessions/{minutes}")
 def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
@@ -175,22 +176,17 @@ def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
         summary_body = "The following guards have been inactive:\n\n" + "\n".join(summary_lines)
         background_tasks.add_task(send_email, "shivamminocha84@gmail.com", summary_subject, summary_body)
 
-    # ✅ Respond immediately
     return {
         "minutes_threshold": minutes,
         "expired_sessions_count": len(expired_sessions),
     }
 
 
-
 @app.get("/sessions")
 def list_sessions():
-    # Only fetch IDs to keep response small
     response = supabase.table("patrol_sessions").select("id").execute()
     session_ids = [r["id"] for r in response.data]
-
-    # ✅ Always return small response
     return {
         "count": len(session_ids),
-        "sample_session_ids": session_ids[:10],  # preview max 10
+        "sample_session_ids": session_ids[:10],
     }
