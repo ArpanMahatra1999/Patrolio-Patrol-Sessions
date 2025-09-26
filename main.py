@@ -66,7 +66,7 @@ def send_email(to_emails, subject: str, body: str):
     try:
         email = sib_api_v3_sdk.SendSmtpEmail(
             to=[{"email": e} for e in to_emails],
-            sender={"email": "no-reply@patrolio.app", "name": "Patrolio App"},
+            sender={"email": "arpanmahatra1999ad@gmail.com", "name": "Patrolio App"},
             subject=subject,
             html_content=body,
         )
