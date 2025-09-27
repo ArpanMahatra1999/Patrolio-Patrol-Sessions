@@ -182,6 +182,24 @@ def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
     }
 
 
+@app.delete("/cleanup_sessions/{minutes}")
+def cleanup_sessions(minutes: int):
+    """Delete all sessions where photo_time is older than {minutes} minutes"""
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+
+    response = supabase.table("patrol_sessions") \
+        .delete() \
+        .lt("photo_time", cutoff.isoformat()) \
+        .execute()
+
+    deleted_count = len(response.data)
+    return {
+        "minutes_threshold": minutes,
+        "deleted_count": deleted_count,
+        "deleted_sessions": response.data
+    }
+
+
 @app.get("/sessions")
 def list_sessions():
     response = supabase.table("patrol_sessions").select("id").execute()
