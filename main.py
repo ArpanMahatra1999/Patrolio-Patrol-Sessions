@@ -157,6 +157,7 @@ def inactive_sessions(minutes: int, background_tasks: BackgroundTasks):
 
     expired_sessions = response.data
     sender_emails = [s["sender_email"] for s in expired_sessions]
+    sender_emails = list(set(sender_emails))
 
     # Queue background email sending
     if sender_emails:
